@@ -41,17 +41,25 @@ BattingOrderOptimizer/
 ├── main.py                 # Streamlitアプリケーションのメインファイル
 ├── pyproject.toml
 ├── README.md               # このファイル
+├── task.md
 ├── uv.lock
 ├── app/
+│   ├── __init__.py
 │   ├── services/
+│   │   ├── __init__.py
 │   │   └── simulation.py   # シミュレーションのコアロジックを実装
 │   └── utils/
+│       ├── __init__.py
+│       ├── add_speed_score.py # 選手データに走力スコアを追加するロジック
 │       └── get_player_data.py # 選手データの取得と加工ロジック
-└── data/
-    ├── processed/          # 処理済みの選手データCSVファイル
-    │   └── (年度)_(チーム略称).csv
-    └── raw/                # 生の選手データCSVファイル
-        └── (年度)_(チーム略称).csv
+├── data/
+│   ├── processed/          # 処理済みの選手データCSVファイル
+│   │   └── (年度)_(チーム略称).csv
+│   └── raw/                # 生の選手データCSVファイル
+│       └── (年度)_(チーム略称).csv
+└── tests/
+    ├── __init__.py
+    └── test_simulation.py    # シミュレーションロジックのテストコード
 ```
 
 ## 動作環境

@@ -26,7 +26,7 @@ def simulate_inning(batting_order, current_batter_abs_index, game_log):
     1イニングのシミュレーションを行う
 
     Args:
-        batting_order (pd.DataFrame): 打順データ (0-8のインデックスを持つ)
+        batting_order (pd.DataFrame): 打順データ (Speedスコアを含む)
         current_batter_abs_index (int): このイニングの先頭打者の通算打席インデックス
         game_log (dict): 試合全体の成績を記録する辞書 (キーは打順ポジション)
 
@@ -34,7 +34,7 @@ def simulate_inning(batting_order, current_batter_abs_index, game_log):
         tuple: (このイニングの得点, 次のイニングの先頭打者の通算打席インデックス, このイニングのイベントログ)
     """
     outs = 0
-    runners = [0, 0, 0]  # 1塁, 2塁, 3塁
+    runners = [None, None, None]  # 1塁, 2塁, 3塁 (player_stats or None)
     runs = 0
     batter_abs_index = current_batter_abs_index
     inning_events = {}
@@ -44,59 +44,108 @@ def simulate_inning(batting_order, current_batter_abs_index, game_log):
         player_stats = batting_order.iloc[batter_pos]
         result = simulate_at_bat(player_stats)
 
-        # 試合全体の成績を更新
         game_log[batter_pos][result] += 1
-
         rbi = 0
-        # 打席結果に応じたランナーの進塁と得点計算
+
+        def should_advance_extra_base(runner_stats, current_outs):
+            if runner_stats is None:
+                return False
+            prob = 0.3
+            if runner_stats['Speed'] > 5:
+                prob += 0.3
+            if current_outs == 2:
+                prob += 0.2
+            return np.random.rand() < prob
+
         if result == 'Out':
             outs += 1
-        elif result == 'BB+HBP':
-            # 四死球: 満塁なら押し出しで1点、そうでなければランナーを進める
-            if runners[0] == 1 and runners[1] == 1 and runners[2] == 1:
-                rbi = 1
-                runs += 1
-            elif runners[0] == 1 and runners[1] == 1:
-                runners[2] = 1 # 2塁ランナーが3塁へ
-            elif runners[0] == 1:
-                runners[1] = 1 # 1塁ランナーが2塁へ
-            runners[0] = 1 # 打者が1塁へ
-        elif result == '1B':
-            # シングルヒット: 3塁ランナーは必ず生還、2塁ランナーは3塁へ、1塁ランナーは2塁へ
-            rbi = runners[2]
-            runs += runners[2]
-            runners[2] = runners[1]
-            runners[1] = runners[0]
-            runners[0] = 1
-        elif result == '2B':
-            # ダブルヒット: 2,3塁ランナーは生還、1塁ランナーは3塁へ
-            rbi = runners[2] + runners[1]
-            runs += rbi
-            runners[2] = runners[0]
-            runners[1] = 1
-            runners[0] = 0
-        elif result == '3B':
-            # トリプルヒット: 全てのランナーが生還
-            rbi = sum(runners)
-            runs += rbi
-            runners = [0, 0, 1]
-        elif result == 'HR':
-            # ホームラン: 全てのランナーと打者が生還
-            rbi = sum(runners) + 1
-            runs += rbi
-            runners = [0, 0, 0]
+        else:
+            new_runners = [None, None, None]
+            if result == 'BB+HBP':
+                # 四死球 (押し出し)
+                if runners[0] is not None and runners[1] is not None and runners[2] is not None:
+                    runs += 1
+                    rbi += 1
+                    new_runners[2] = runners[1]
+                    new_runners[1] = runners[0]
+                elif runners[0] is not None and runners[1] is not None:
+                    new_runners[2] = runners[1]
+                    new_runners[1] = runners[0]
+                elif runners[0] is not None:
+                    new_runners[1] = runners[0]
+                
+                if runners[1] is not None and runners[0] is None: # 2塁のみ
+                    new_runners[1] = runners[1]
+                if runners[2] is not None: # 3塁は常にキープ
+                    new_runners[2] = runners[2]
+                new_runners[0] = player_stats
 
-        # イベントログ用の文字列を作成
+            elif result == '1B':
+                # 3塁走者 -> 生還
+                if runners[2] is not None:
+                    runs += 1
+                    rbi += 1
+                # 2塁走者 -> 3塁 or 生還
+                if runners[1] is not None:
+                    if should_advance_extra_base(runners[1], outs):
+                        runs += 1
+                        rbi += 1
+                    else:
+                        new_runners[2] = runners[1]
+                # 1塁走者 -> 2塁 or 3塁
+                if runners[0] is not None:
+                    # 2塁走者が3塁に止まっていたら、3塁には進めない
+                    can_try_for_third = new_runners[2] is None
+                    if can_try_for_third and should_advance_extra_base(runners[0], outs):
+                        new_runners[2] = runners[0]
+                    else:
+                        new_runners[1] = runners[0]
+                # 打者 -> 1塁
+                new_runners[0] = player_stats
+
+            elif result == '2B':
+                # 3塁, 2塁走者 -> 生還
+                if runners[2] is not None:
+                    runs += 1
+                    rbi += 1
+                if runners[1] is not None:
+                    runs += 1
+                    rbi += 1
+                # 1塁走者 -> 3塁 or 生還
+                if runners[0] is not None:
+                    if should_advance_extra_base(runners[0], outs):
+                        runs += 1
+                        rbi += 1
+                    else:
+                        new_runners[2] = runners[0]
+                # 打者 -> 2塁
+                new_runners[1] = player_stats
+
+            elif result == '3B':
+                # 全ランナー生還
+                for runner in runners:
+                    if runner is not None:
+                        runs += 1
+                        rbi += 1
+                new_runners[2] = player_stats
+
+            elif result == 'HR':
+                for runner in runners:
+                    if runner is not None:
+                        runs += 1
+                        rbi += 1
+                runs += 1
+                rbi += 1
+            
+            runners = new_runners
+
         log_event = result
         if rbi > 0:
             log_event += f" (+{rbi})"
-
-        # イニングごとのログを更新
         if batter_pos not in inning_events:
             inning_events[batter_pos] = log_event
         else:
             inning_events[batter_pos] += f", {log_event}"
-        
         if rbi > 0:
             game_log[batter_pos]['RBI'] += rbi
 
