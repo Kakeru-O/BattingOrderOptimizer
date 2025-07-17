@@ -21,7 +21,7 @@ def simulate_at_bat(player_stats):
     )
     return result
 
-def simulate_inning(batting_order, current_batter_abs_index, game_log):
+def simulate_inning(batting_order, current_batter_abs_index, game_log, enable_log=True):
     """
     1イニングのシミュレーションを行う
 
@@ -37,7 +37,7 @@ def simulate_inning(batting_order, current_batter_abs_index, game_log):
     runners = [None, None, None]  # 1塁, 2塁, 3塁 (player_stats or None)
     runs = 0
     batter_abs_index = current_batter_abs_index
-    inning_events = {}
+    inning_events = {} if enable_log else None
 
     while outs < 3:
         batter_pos = batter_abs_index % 9
@@ -139,13 +139,14 @@ def simulate_inning(batting_order, current_batter_abs_index, game_log):
             
             runners = new_runners
 
-        log_event = result
-        if rbi > 0:
-            log_event += f" (+{rbi})"
-        if batter_pos not in inning_events:
-            inning_events[batter_pos] = log_event
-        else:
-            inning_events[batter_pos] += f", {log_event}"
+        if enable_log:
+            log_event = result
+            if rbi > 0:
+                log_event += f" (+{rbi})"
+            if batter_pos not in inning_events:
+                inning_events[batter_pos] = log_event
+            else:
+                inning_events[batter_pos] += f", {log_event}"
         if rbi > 0:
             game_log[batter_pos]['RBI'] += rbi
 
@@ -170,7 +171,7 @@ def simulate_game(batting_order, enable_inning_log=True):
     inning_by_inning_log = {i: [''] * 9 for i in range(9)} if enable_inning_log else None
 
     for inning in range(9):
-        runs, next_batter_abs_index, inning_events = simulate_inning(batting_order, batter_abs_index, game_log)
+        runs, next_batter_abs_index, inning_events = simulate_inning(batting_order, batter_abs_index, game_log, enable_log=enable_inning_log)
         total_runs += runs
         batter_abs_index = next_batter_abs_index
         if enable_inning_log:
