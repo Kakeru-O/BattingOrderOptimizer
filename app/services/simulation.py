@@ -48,34 +48,40 @@ def simulate_inning(batting_order, current_batter_abs_index, game_log):
         game_log[batter_pos][result] += 1
 
         rbi = 0
+        # 打席結果に応じたランナーの進塁と得点計算
         if result == 'Out':
             outs += 1
         elif result == 'BB+HBP':
+            # 四死球: 満塁なら押し出しで1点、そうでなければランナーを進める
             if runners[0] == 1 and runners[1] == 1 and runners[2] == 1:
                 rbi = 1
                 runs += 1
             elif runners[0] == 1 and runners[1] == 1:
-                runners[2] = 1
+                runners[2] = 1 # 2塁ランナーが3塁へ
             elif runners[0] == 1:
-                runners[1] = 1
-            runners[0] = 1
+                runners[1] = 1 # 1塁ランナーが2塁へ
+            runners[0] = 1 # 打者が1塁へ
         elif result == '1B':
+            # シングルヒット: 3塁ランナーは必ず生還、2塁ランナーは3塁へ、1塁ランナーは2塁へ
             rbi = runners[2]
             runs += runners[2]
             runners[2] = runners[1]
             runners[1] = runners[0]
             runners[0] = 1
         elif result == '2B':
+            # ダブルヒット: 2,3塁ランナーは生還、1塁ランナーは3塁へ
             rbi = runners[2] + runners[1]
             runs += rbi
             runners[2] = runners[0]
             runners[1] = 1
             runners[0] = 0
         elif result == '3B':
+            # トリプルヒット: 全てのランナーが生還
             rbi = sum(runners)
             runs += rbi
             runners = [0, 0, 1]
         elif result == 'HR':
+            # ホームラン: 全てのランナーと打者が生還
             rbi = sum(runners) + 1
             runs += rbi
             runners = [0, 0, 0]
