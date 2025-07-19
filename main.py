@@ -30,8 +30,11 @@ def load_data(year, team):
         return pd.DataFrame() # unreachable
 
 def calculate_player_stats(stats_df):
-    stats_df['PA'] = stats_df[['1B', '2B', '3B', 'HR', 'BB+HBP', 'Out']].sum(axis=1)
-    stats_df['AB'] = stats_df[['1B', '2B', '3B', 'HR', 'Out']].sum(axis=1)
+    # 新しいOutの定義
+    stats_df['Out'] = stats_df['SO'] + stats_df['Ground_Out'] + stats_df['Fly_Out']
+    # PAの計算にSacrifice_Attemptsを含める
+    stats_df['PA'] = stats_df[['1B', '2B', '3B', 'HR', 'BB+HBP', 'SO', 'Ground_Out', 'Fly_Out', 'Sacrifice_Attempts']].sum(axis=1)
+    stats_df['AB'] = stats_df[['1B', '2B', '3B', 'HR', 'SO', 'Ground_Out', 'Fly_Out']].sum(axis=1) # ABは犠打を含まない
     stats_df['H'] = stats_df[['1B', '2B', '3B', 'HR']].sum(axis=1)
     stats_df['AVG'] = stats_df['H'] / stats_df['AB']
     stats_df['OBP'] = (stats_df['H'] + stats_df['BB+HBP']) / stats_df['PA']
@@ -56,7 +59,7 @@ def main():
 
     st.sidebar.title("🔍 最良打順推定設定")
     num_trials = st.sidebar.number_input("試行回数", min_value=10, max_value=10000, value=100, help="ランダムな打順を生成し、シミュレーションを行う回数です。数値を増やすほど精度が向上しますが、時間がかかります。")
-    run_best_order_estimation = st.sidebar.button("最良打順を推定して表示")
+    #run_best_order_estimation = st.sidebar.button("最良打順を推定して表示")
 
     df = load_data(year, team)
 
@@ -107,7 +110,8 @@ def main():
 
         # 最良打順推定結果セクション
         st.markdown("---")
-        if run_best_order_estimation:
+        #if run_best_order_estimation:
+        if st.button("最良打順シミュレーション"):
             st.header("🏆 最良打順推定結果")
             st.write("選択された9人の選手の中から、最も得点効率の良い打順と悪い打順を推定します。")
             if len(batting_order_players) < 9:
@@ -133,7 +137,7 @@ def main():
                     
                     best_stats_df = calculate_player_stats(best_stats_df)
 
-                    st.dataframe(best_stats_df[['PA', 'AB', 'H', '1B', '2B', '3B', 'HR', 'RBI', 'BB+HBP', 'Out', 'AVG', 'OBP', 'SLG', 'OPS']].fillna(0).round(3))
+                    st.dataframe(best_stats_df[['PA', 'AB', 'H', '1B', '2B', '3B', 'HR', 'RBI', 'BB+HBP', 'SO', 'Sacrifice_Success', 'Out', 'AVG', 'OBP', 'SLG', 'OPS']].fillna(0).round(3))
 
                     st.subheader("💔 最も得点効率の悪い打順 (Worst Order)")
                     st.metric("平均得点 (1試合あたり)", f"{estimation_result['worst_order']['avg_runs']:.2f}点")
@@ -148,7 +152,7 @@ def main():
 
                     worst_stats_df = calculate_player_stats(worst_stats_df)
 
-                    st.dataframe(worst_stats_df[['PA', 'AB', 'H', '1B', '2B', '3B', 'HR', 'RBI', 'BB+HBP', 'Out', 'AVG', 'OBP', 'SLG', 'OPS']].fillna(0).round(3))
+                    st.dataframe(worst_stats_df[['PA', 'AB', 'H', '1B', '2B', '3B', 'HR', 'RBI', 'BB+HBP', 'SO', 'Sacrifice_Success', 'Out', 'AVG', 'OBP', 'SLG', 'OPS']].fillna(0).round(3))
                 else:
                     st.error("シミュレーション結果を取得できませんでした。")
 

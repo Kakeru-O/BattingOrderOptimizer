@@ -9,16 +9,16 @@ def simulate_at_bat(player_stats):
         player_stats (pd.Series): 選手の成績データ
 
     Returns:
-        str: 打席結果 (e.g., '1B', '2B', 'HR', 'BB+HBP', 'Out')
+        str: 打席結果 (e.g., '1B', 'SO', 'Ground_Out')
     """
-    probabilities = player_stats[['1B_ratio', '2B_ratio', '3B_ratio', 'HR_ratio', 'BB+HBP_ratio', 'Out_ratio']].values.astype('float64')
+    # 新しいアウトのカテゴリを含める
+    result_types = ['1B', '2B', '3B', 'HR', 'BB+HBP', 'SO', 'Ground_Out', 'Fly_Out']
+    probabilities = player_stats[[f'{r}_ratio' for r in result_types]].values.astype('float64')
+    
     # 確率の合計が1になるように正規化（浮動小数点誤差を考慮）
     probabilities /= probabilities.sum()
 
-    result = np.random.choice(
-        ['1B', '2B', '3B', 'HR', 'BB+HBP', 'Out'],
-        p=probabilities
-    )
+    result = np.random.choice(result_types, p=probabilities)
     return result
 
 def _should_advance_extra_base_single(runner_speed, current_outs):
@@ -33,6 +33,41 @@ def _should_advance_extra_base_single(runner_speed, current_outs):
     if current_outs == 2:
         prob += 0.2
     return np.random.rand() < prob
+
+def should_attempt_bunt(player_stats, outs, runners_on_base):
+    """犠打を試みるべきか判断する"""
+    # 0アウトまたは1アウトで、得点圏にランナーがいる、または1塁にランナーがいる
+    is_bunt_situation = outs < 2 and (runners_on_base[1] > 0 or runners_on_base[0] > 0)
+    if not is_bunt_situation:
+        return False
+    
+    # アウトになりやすい選手ほどバントを試行しやすくする
+    # Out_ratioが高いほど、試行確率が上がる線形的な確率
+    bunt_probability = player_stats['Out_ratio'] * 0.1 # 係数は調整可能
+    return np.random.rand() < bunt_probability
+
+def simulate_bunt():
+    """犠打の成否をシミュレートする"""
+    # 成功率は固定値 (例: 80%)
+    return 'Sacrifice_Success' if np.random.rand() < 0.8 else 'Bunt_Fail'
+
+def _advance_runners_on_groundout(runners_speed):
+    """ゴロアウトでの進塁を処理する"""
+    runs_scored = 0
+    new_runners = np.zeros(3, dtype=int)
+
+    # 3塁ランナーは生還
+    if runners_speed[2] > 0:
+        runs_scored += 1
+    # 2塁ランナーは3塁へ
+    if runners_speed[1] > 0:
+        new_runners[2] = runners_speed[1]
+    # 1塁ランナーは2塁へ
+    if runners_speed[0] > 0:
+        new_runners[1] = runners_speed[0]
+
+    return runs_scored, new_runners
+
 
 def _advance_runners_numpy(runners_speed, hit_type, batter_speed, outs):
     """
@@ -50,7 +85,21 @@ def _advance_runners_numpy(runners_speed, hit_type, batter_speed, outs):
     if runners_speed[1] > 0: bases[2] = runners_speed[1] # 2nd base
     if runners_speed[2] > 0: bases[3] = runners_speed[2] # 3rd base
 
-    if hit_type == 'BB+HBP':
+    if hit_type == 'Sacrifice_Success':
+        # 3塁ランナーが生還 (スクイズの場合だが、ここでは単純化)
+        if bases[3] > 0:
+            runs_scored += 1
+            bases[3] = 0
+        # 2塁ランナーは3塁へ
+        if bases[2] > 0:
+            bases[3] = bases[2]
+            bases[2] = 0
+        # 1塁ランナーは2塁へ
+        if bases[1] > 0:
+            bases[2] = bases[1]
+            bases[1] = 0
+
+    elif hit_type == 'BB+HBP':
         # Forced advancements
         if bases[1] > 0: # Runner on 1st
             if bases[2] > 0: # Runner on 2nd
@@ -132,17 +181,9 @@ def _advance_runners_numpy(runners_speed, hit_type, batter_speed, outs):
 def simulate_inning(batting_order, current_batter_abs_index, game_log, enable_log=True):
     """
     1イニングのシミュレーションを行う
-
-    Args:
-        batting_order (pd.DataFrame): 打順データ (Speedスコアを含む)
-        current_batter_abs_index (int): このイニングの先頭打者の通算打席インデックス
-        game_log (dict): 試合全体の成績を記録する辞書 (キーは打順ポジション)
-
-    Returns:
-        tuple: (このイニングの得点, 次のイニングの先頭打者の通算打席インデックス, このイニングのイベントログ)
     """
     outs = 0
-    runners_speed = np.zeros(3, dtype=int)  # 1塁, 2塁, 3塁のランナーのSpeedスコア (0 if no runner)
+    runners_speed = np.zeros(3, dtype=int)  # 1塁, 2塁, 3塁のランナーのSpeedスコア
     runs = 0
     batter_abs_index = current_batter_abs_index
     inning_events = {} if enable_log else None
@@ -150,21 +191,67 @@ def simulate_inning(batting_order, current_batter_abs_index, game_log, enable_lo
     while outs < 3:
         batter_pos = batter_abs_index % 9
         player_stats = batting_order.iloc[batter_pos]
-        result = simulate_at_bat(player_stats)
-
-        game_log[batter_pos][result] += 1
         rbi = 0
+        result = ''
 
-        if result == 'Out':
-            outs += 1
+        # --- 犠打の試行 ---
+        if should_attempt_bunt(player_stats, outs, runners_speed):
+            result = simulate_bunt()
+            game_log[batter_pos]['Sacrifice_Attempts'] += 1 # 試行を記録
         else:
+            # --- 通常の打席 ---
+            result = simulate_at_bat(player_stats)
+
+        # --- 結果処理 ---
+        if result == 'Sacrifice_Success':
+            outs += 1
+            runs_this_play, new_runners_speed = _advance_runners_numpy(
+                runners_speed, result, 0, outs # 打者はアウトなのでSpeedは0
+            )
+            runs += runs_this_play
+            rbi += runs_this_play
+            runners_speed = new_runners_speed
+            game_log[batter_pos]['Sacrifice_Success'] += 1
+
+        elif result == 'Bunt_Fail':
+            outs += 1
+            # 併殺なども考えられるが、単純に打者アウト、進塁なしとする
+            game_log[batter_pos]['Out'] += 1 # 通常のアウトとして記録
+
+        elif result in ['SO', 'Fly_Out']:
+            outs += 1
+            game_log[batter_pos][result] += 1
+            # フライアウトでのタッチアップはここで実装可能（今回は省略）
+
+        elif result == 'Ground_Out':
+            outs += 1
+            game_log[batter_pos][result] += 1
+            # 併殺打の簡易判定: 1アウト未満、1塁にランナー、で50%の確率
+            is_double_play = outs < 2 and runners_speed[0] > 0 and np.random.rand() < 0.5
+            if is_double_play:
+                outs += 1
+                # 1塁ランナーもアウト。他のランナーは進塁。
+                runners_speed[0] = 0 
+                runs_this_play, new_runners_speed = _advance_runners_on_groundout(runners_speed)
+                runs += runs_this_play
+                rbi += runs_this_play
+                runners_speed = new_runners_speed
+            elif outs < 3: # 3アウト目でないなら進塁
+                runs_this_play, new_runners_speed = _advance_runners_on_groundout(runners_speed)
+                runs += runs_this_play
+                rbi += runs_this_play
+                runners_speed = new_runners_speed
+
+        else: # ヒット or 四死球
+            game_log[batter_pos][result] += 1
             runs_this_play, new_runners_speed = _advance_runners_numpy(
                 runners_speed, result, player_stats['Speed'], outs
             )
             runs += runs_this_play
-            rbi += runs_this_play # For simplicity, RBI is equal to runs scored on the play
+            rbi += runs_this_play
             runners_speed = new_runners_speed
 
+        # --- ログ記録 ---
         if enable_log:
             log_event = result
             if rbi > 0:
@@ -193,7 +280,8 @@ def simulate_game(batting_order, enable_inning_log=True):
     """
     total_runs = 0
     batter_abs_index = 0
-    game_log = {i: {'1B': 0, '2B': 0, '3B': 0, 'HR': 0, 'BB+HBP': 0, 'Out': 0, 'RBI': 0} for i in range(9)}
+    game_log_keys = ['1B', '2B', '3B', 'HR', 'BB+HBP', 'SO', 'Ground_Out', 'Fly_Out', 'Sacrifice_Attempts', 'Sacrifice_Success', 'Out', 'RBI']
+    game_log = {i: {key: 0 for key in game_log_keys} for i in range(9)}
     inning_by_inning_log = {i: [''] * 9 for i in range(9)} if enable_inning_log else None
 
     for inning in range(9):
@@ -222,7 +310,7 @@ def estimate_best_batting_order(selected_players_df, num_trials, progress_bar):
     worst_order_info = {"avg_runs": float('inf')}
 
     # Define the order of keys for consistent indexing
-    result_keys = ['1B', '2B', '3B', 'HR', 'BB+HBP', 'Out', 'RBI']
+    result_keys = ['1B', '2B', '3B', 'HR', 'BB+HBP', 'SO', 'Ground_Out', 'Fly_Out', 'Sacrifice_Attempts', 'Sacrifice_Success', 'Out', 'RBI']
 
     for i in range(num_trials):
         # 打順をシャッフル
