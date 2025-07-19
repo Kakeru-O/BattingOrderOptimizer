@@ -1,19 +1,21 @@
 
 import pandas as pd
+import os
 
-def add_speed_score(year: str, team: str):
+def add_speed_score(year: str, team: str, raw_dir="./data/raw"):
     """
     選手データに走力ポイントを追加する
 
     Args:
         year (str): 年度
         team (str): チーム名
+        raw_dir (str): rawデータが格納されているディレクトリ
 
     Returns:
         pd.DataFrame: 走力ポイントを追加した選手データ
     """
     # data/rawから元データを読み込む
-    raw_path = f"./data/raw/{year}_{team}.csv"
+    raw_path = os.path.join(raw_dir, f"{year}_{team}.csv")
     try:
         df = pd.read_csv(raw_path)
     except FileNotFoundError:
@@ -45,20 +47,20 @@ def add_speed_score(year: str, team: str):
 
     return df
 
-def merge_and_save_processed_data(year: str, team: str):
+def merge_and_save_processed_data(year: str, team: str, raw_dir="./data/raw", processed_dir="./data/processed"):
     """
     processedデータにSpeedスコアをマージして上書き保存する
     """
     # processedデータを読み込む
-    processed_path = f"./data/processed/{year}_{team}.csv"
+    processed_path = os.path.join(processed_dir, f"{year}_{team}.csv")
     try:
         df_processed = pd.read_csv(processed_path)
     except FileNotFoundError:
         print(f"Error: {processed_path} not found. Skipping.")
         return
 
-    # 走力スコアデータを取得
-    df_speed = add_speed_score(year, team)
+    # 走力スコアデータを取得 (rawデータの場所を指定)
+    df_speed = add_speed_score(year, team, raw_dir=raw_dir)
     if df_speed is None:
         return
 
@@ -76,8 +78,10 @@ def merge_and_save_processed_data(year: str, team: str):
     print(f"Successfully updated: {processed_path}")
 
 
+def main(teams, year, raw_dir="./data/raw", processed_dir="./data/processed"):
+    for team_id in teams:
+        merge_and_save_processed_data(year, team_id, raw_dir=raw_dir, processed_dir=processed_dir)
+
 if __name__ == "__main__":
-    YEAR = "2024"
     TEAMS = ["g", "t", "c", "db", "s", "d", "f", "e", "m", "l", "b", "h"]
-    for team_id in TEAMS:
-        merge_and_save_processed_data(YEAR, team_id)
+    main(TEAMS, "2024")
